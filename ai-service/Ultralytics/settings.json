@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "/Users/mac/Development/docker-projects/projects/jalur/ai-service/datasets",
+  "weights_dir": "weights",
+  "runs_dir": "runs",
+  "uuid": "3d8bc2cefe8a59e0c8e69a44c09f3d65dbaddf7f96d42fa59b26626e96f5375f",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

@@ -1,0 +1,16 @@
+# Opsi debug: jalankan server PHP minimal (tanpa CI4) di port 8010
+# Untuk cek apakah ECONNRESET karena Docker/port atau karena CI4.
+#
+# Cara pakai:
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up -d backend
+# Lalu tes: GET http://localhost:8010/ping.php
+# Jika dapat {"status":true,"message":"php ok"} → masalah di CI4/spark. Jika tetap ECONNRESET → masalah Docker/port.
+# Kembali ke normal: docker compose up -d backend (tanpa -f docker-compose.debug.yml)
+
+version: "3"
+services:
+  backend:
+    command: sh -c "php -S 0.0.0.0:8080 -t public"
+    # Tanpa spark serve; hanya serve file di public/. Tes: /ping.php
+    ports:
+      - "8010:8080"

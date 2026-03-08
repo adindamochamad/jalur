@@ -1,0 +1,382 @@
+# 🚧 Project: Deteksi Jalan Berlubang Otomatis
+# Context untuk Cursor AI — Baca ini sebelum generate kode apapun
+
+---
+
+## 🎯 Tujuan Project
+Sistem deteksi jalan berlubang berbasis AI yang memungkinkan:
+- Warga upload foto jalan rusak lewat web
+- AI (YOLOv8) otomatis mendeteksi lubang dan menilai tingkat keparahan
+- Laporan otomatis tersimpan dengan koordinat GPS
+- Dashboard admin untuk monitoring dan tindak lanjut
+- Peta interaktif sebagai visualisasi sebaran laporan
+
+---
+
+## 🗂️ Arsitektur Sistem (Full Separation)
+
+```
+[User Browser]
+    ↓
+[Next.js 14 + Shadcn/UI]          → yourdomain.com         (Frontend)
+    ↓ axios / fetch (REST)
+[CI4 — Pure REST API]             → api.yourdomain.com      (Backend)
+    ↓ CURLRequest internal
+[Python FastAPI — AI Service]     → localhost:8000           (Internal only)
+    ↓
+[MySQL 8]
+
+VPS Ubuntu 22.04
+├── Nginx (reverse proxy)
+├── PHP 8.1 + PHP-FPM
+├── Node.js 20 (Next.js)
+├── Python 3.10 + Supervisor
+└── MySQL 8
+```
+
+---
+
+## 🛠️ Tech Stack Lengkap
+
+### 🎨 Frontend — Next.js + Shadcn
+- **Framework:** Next.js 14 (App Router)
+- **UI Library:** Shadcn/UI (install per komponen: `npx shadcn-ui add`)
+- **Styling:** Tailwind CSS (sudah include di Shadcn)
+- **HTTP Client:** Axios
+- **Maps:** Leaflet.js + react-leaflet
+- **Charts:** Recharts (kompatibel dengan Shadcn)
+- **State:** Zustand atau React Context (jangan Redux)
+- **Form:** React Hook Form + Zod (validasi)
+- **Bahasa:** TypeScript
+
+### ⚙️ Backend — CI4 REST API
+- **Framework:** CodeIgniter 4 — BUKAN Laravel
+- **PHP:** >= 8.1
+- **Database:** MySQL 8
+- **Auth:** JWT (library `firebase/php-jwt`)
+- **HTTP Client:** CI4 CURLRequest (komunikasi ke Python)
+- **Response:** Selalu JSON — tidak ada view/HTML sama sekali
+
+### 🤖 AI Service — Python FastAPI
+- **Framework:** FastAPI
+- **Model:** YOLOv8 (ultralytics)
+- **Image Processing:** OpenCV, Pillow
+- **Runtime:** Python 3.10+
+- **Server:** Uvicorn + Supervisor (background process)
+
+### 🖥️ Server — VPS Ubuntu 22.04
+- **Web Server:** Nginx (reverse proxy untuk Next.js dan CI4)
+- **Process Manager:** Supervisor (untuk FastAPI berjalan background)
+- **SSL:** Certbot (Let's Encrypt)
+
+---
+
+## 📁 Struktur Folder
+
+```
+pothole-detector/                        ← ROOT PROJECT
+│
+├── frontend/                            ← Next.js App
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx                     ← Landing / Form lapor
+│   │   ├── dashboard/
+│   │   │   └── page.tsx                 ← Dashboard admin
+│   │   ├── laporan/
+│   │   │   ├── page.tsx                 ← Daftar laporan
+│   │   │   └── [id]/
+│   │   │       └── page.tsx             ← Detail laporan
+│   │   └── login/
+│   │       └── page.tsx
+│   ├── components/
+│   │   ├── ui/                          ← Shadcn components (auto-generated)
+│   │   ├── LaporanForm.tsx              ← Form upload foto + GPS
+│   │   ├── LaporanCard.tsx              ← Card per laporan
+│   │   ├── PetaLaporan.tsx              ← Leaflet map
+│   │   ├── StatCard.tsx                 ← Card statistik dashboard
+│   │   └── Navbar.tsx
+│   ├── lib/
+│   │   ├── api.ts                       ← Axios instance + semua API calls
+│   │   ├── utils.ts                     ← Shadcn utils (cn function)
+│   │   └── types.ts                     ← TypeScript interfaces
+│   ├── hooks/
+│   │   └── useLaporan.ts
+│   ├── .env.local
+│   ├── tailwind.config.ts
+│   └── package.json
+│
+├── backend/                             ← CI4 REST API
+│   ├── app/
+│   │   ├── Controllers/
+│   │   │   └── Api/
+│   │   │       ├── AuthController.php
+│   │   │       ├── LaporanController.php
+│   │   │       └── DashboardController.php
+│   │   ├── Models/
+│   │   │   ├── LaporanModel.php
+│   │   │   └── UserModel.php
+│   │   ├── Filters/
+│   │   │   └── JwtFilter.php            ← middleware validasi JWT
+│   │   ├── Libraries/
+│   │   │   └── PotholeDetector.php      ← wrapper ke Python FastAPI
+│   │   └── Config/
+│   │       └── Routes.php
+│   ├── public/
+│   │   └── uploads/jalan/
+│   └── .env
+│
+├── ai-service/                          ← Python FastAPI
+│   ├── main.py
+│   ├── detector.py
+│   ├── requirements.txt
+│   └── models/
+│       └── pothole_yolov8.pt
+│
+└── deploy/                              ← Config server
+    ├── nginx/
+    │   ├── frontend.conf
+    │   └── backend.conf
+    └── supervisor/
+        └── fastapi.conf
+```
+
+---
+
+## 🗄️ Skema Database
+
+```sql
+CREATE TABLE laporan_jalan (
+    id              INT PRIMARY KEY AUTO_INCREMENT,
+    foto_asli       VARCHAR(255) NOT NULL,
+    foto_hasil      VARCHAR(255),
+    latitude        DECIMAL(10, 8),
+    longitude       DECIMAL(11, 8),
+    alamat          TEXT,
+    status          ENUM('terdeteksi','diproses','selesai') DEFAULT 'terdeteksi',
+    keparahan       ENUM('ringan','sedang','parah') DEFAULT 'ringan',
+    confidence      FLOAT,
+    jumlah_lubang   INT DEFAULT 0,
+    pelapor_nama    VARCHAR(100),
+    pelapor_hp      VARCHAR(20),
+    catatan         TEXT,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE users (
+    id          INT PRIMARY KEY AUTO_INCREMENT,
+    nama        VARCHAR(100),
+    email       VARCHAR(100) UNIQUE,
+    password    VARCHAR(255),
+    role        ENUM('admin','petugas') DEFAULT 'petugas',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+## 🔌 API Contract
+
+### Auth
+```
+POST   /api/auth/login         → { email, password } → { token, user }
+POST   /api/auth/logout        → (header: Bearer token)
+```
+
+### Laporan
+```
+GET    /api/laporan            → list semua laporan (filter & pagination)
+GET    /api/laporan/{id}       → detail laporan
+POST   /api/laporan            → buat laporan baru (upload foto + koordinat)
+PUT    /api/laporan/{id}       → update status (admin only)
+DELETE /api/laporan/{id}       → hapus laporan (admin only)
+```
+
+### Dashboard
+```
+GET    /api/dashboard/stats    → { total, per_status, per_keparahan }
+GET    /api/dashboard/peta     → list koordinat untuk map markers
+```
+
+### Python FastAPI (Internal — tidak expose ke publik)
+```
+POST   localhost:8000/detect
+Request:  { image_base64: "data:image/jpeg;base64,..." }
+Response: {
+  success: true,
+  jumlah_lubang: 3,
+  keparahan: "parah",
+  confidence: 0.87,
+  foto_hasil_base64: "...",
+  deteksi: [{ label: "pothole", confidence: 0.92, bbox: [x,y,w,h] }]
+}
+```
+
+### Standard JSON Response CI4
+```json
+// Success
+{ "status": true, "message": "Berhasil", "data": { ... } }
+
+// Error
+{ "status": false, "message": "Pesan error", "errors": { ... } }
+```
+
+---
+
+## 📏 Coding Conventions
+
+### Next.js / TypeScript
+- Gunakan **App Router** — BUKAN Pages Router
+- Semua tipe/interface di `lib/types.ts`
+- Semua API call di `lib/api.ts` — jangan fetch langsung di komponen
+- Shadcn components yang dipakai: `Button`, `Card`, `Input`, `Table`, `Badge`, `Dialog`, `Skeleton`, `Toast`
+- Environment variable frontend: `NEXT_PUBLIC_API_URL` di `.env.local`
+- Gunakan `'use client'` hanya kalau komponen butuh state/event
+- Server Component by default
+
+### CI4 (PHP)
+- **BUKAN Laravel** — jangan pakai `Route::`, `Eloquent`, `Blade`, `facade`
+- Semua controller ada di `app/Controllers/Api/`
+- Validasi input pakai `$this->validate()`
+- Response selalu JSON — tidak ada `return view()`
+- JWT divalidasi lewat Filter, bukan di dalam controller
+- Upload simpan ke `public/uploads/jalan/` dengan `uniqid() . '.jpg'`
+- snake_case untuk nama kolom DB, camelCase untuk method PHP
+
+### Python (FastAPI)
+- Load model YOLO **sekali saat startup** pakai `@app.on_event("startup")` — bukan tiap request
+- Validasi input pakai Pydantic BaseModel
+- Gunakan `logging` module — bukan `print()`
+- Semua response punya key: `success`, `message`, dan data
+
+---
+
+## ⚙️ Konfigurasi Server VPS
+
+### Nginx — Frontend (Next.js port 3000)
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com;
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+### Nginx — Backend (CI4)
+```nginx
+server {
+    listen 80;
+    server_name api.yourdomain.com;
+    root /var/www/backend/public;
+    index index.php;
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+    location ~ \.php$ {
+        fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+}
+```
+
+### Supervisor — FastAPI (background process)
+```ini
+[program:pothole-fastapi]
+command=/usr/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8000
+directory=/var/www/ai-service
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/fastapi.err.log
+stdout_logfile=/var/log/fastapi.out.log
+```
+
+---
+
+## ⚠️ Aturan Penting untuk Cursor
+
+1. **JANGAN** gunakan Laravel syntax — ini CI4
+2. **JANGAN** gunakan Pages Router Next.js — gunakan App Router
+3. **JANGAN** install semua Shadcn — pakai `npx shadcn-ui add [nama-komponen]`
+4. **JANGAN** expose port 8000 Python ke publik — hanya CI4 yang boleh akses
+5. **SELALU** validasi file upload: hanya jpg/jpeg/png, max 5MB
+6. **SELALU** gunakan TypeScript interface dari `lib/types.ts`
+7. **JANGAN** hardcode URL API — gunakan `process.env.NEXT_PUBLIC_API_URL`
+8. CORS di CI4 hanya allow dari domain frontend
+9. JWT disimpan di `httpOnly cookie` — BUKAN localStorage
+
+---
+
+## 🚀 Urutan Pengerjaan
+
+### Hari 1 — Setup & Infrastruktur
+- [ ] Init Next.js: `npx create-next-app@latest frontend --typescript --tailwind --app`
+- [ ] Setup Shadcn: `npx shadcn-ui@latest init`
+- [ ] Init CI4: `composer create-project codeigniter4/appstarter backend`
+- [ ] Setup Python FastAPI + install ultralytics YOLOv8
+- [ ] Konfigurasi Nginx + Supervisor di VPS
+
+### Hari 2 — Backend CI4
+- [ ] Buat migrasi semua tabel
+- [ ] Setup JWT (firebase/php-jwt) + JwtFilter
+- [ ] AuthController
+- [ ] LaporanController (CRUD + upload foto)
+- [ ] PotholeDetector library
+
+### Hari 3 — AI Service Python
+- [ ] FastAPI endpoint `/detect`
+- [ ] Integrasi YOLOv8 + gambar hasil bounding box
+- [ ] Test end-to-end: CI4 → Python → simpan ke DB
+
+### Hari 4-5 — Frontend Next.js
+- [ ] Layout + Navbar Shadcn
+- [ ] Halaman form lapor (upload foto + ambil GPS otomatis)
+- [ ] Halaman daftar laporan (Table + Badge status)
+- [ ] Halaman detail laporan (foto sebelum/sesudah deteksi)
+
+### Hari 6 — Dashboard + Peta
+- [ ] Dashboard statistik (Recharts + Shadcn Card)
+- [ ] Peta Leaflet dengan marker warna per keparahan
+- [ ] Filter & search laporan
+
+### Hari 7 — Polish + Deploy
+- [ ] Halaman login admin
+- [ ] SSL dengan Certbot
+- [ ] README lengkap + screenshot + demo GIF
+- [ ] Final test semua fitur
+
+---
+
+## 💬 Contoh Prompt Siap Pakai di Cursor
+
+```
+Buatkan LaporanController.php di CI4 sebagai REST API sesuai context project ini
+```
+```
+Buatkan komponen LaporanForm.tsx menggunakan Shadcn Form, Input, dan Button
+```
+```
+Buatkan main.py FastAPI untuk deteksi YOLOv8 sesuai API contract di atas
+```
+```
+Buatkan halaman dashboard/page.tsx dengan Shadcn Card dan Recharts
+```
+```
+Buatkan JwtFilter.php untuk middleware CI4 sesuai arsitektur project ini
+```
+```
+Buatkan lib/api.ts dengan Axios instance dan semua fungsi API call sesuai kontrak API
+```
+```
+Buatkan migrasi CI4 untuk semua tabel sesuai skema database di atas
+```
+```
+Buatkan PetaLaporan.tsx menggunakan react-leaflet dengan marker warna per keparahan
+```

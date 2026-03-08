@@ -1,0 +1,106 @@
+# Docker Compose — Project Jalur (Deteksi Jalan Berlubang)
+# Port sengaja dipisah agar tidak tabrakan dengan project lain:
+#   - Frontend Next.js: 3010  (lms/tesdishub/mywebsite/nexapos pakai 8001–8004, 8080, 8085)
+#   - Backend CI4 API:  8010
+#   - MySQL:            3310  (lms 3306, tesdishub 3307, nexapos 3308, kasirix 3309)
+#   - FastAPI AI:       internal only (tidak di-expose ke host)
+#
+# Cara jalankan: docker compose up -d
+#   → Frontend:  http://localhost:3010
+#   → API:       http://localhost:8010
+#   → MySQL:     host 127.0.0.1, port 3310, user root, password root, database jalur
+
+services:
+  frontend:
+    image: node:20-alpine
+    container_name: jalur-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - jalur-node-modules:/app/node_modules
+    ports:
+      - "3010:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8010
+      - NODE_ENV=development
+    command: sh -c "npm install && npm run dev"
+    networks:
+      - jalur-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: jalur-backend
+    container_name: jalur-backend
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    ports:
+      - "8010:8080"
+    environment:
+      - CI_ENVIRONMENT=development
+      - database.default.hostname=mysql
+      - database.default.database=jalur
+      - database.default.username=jalur
+      - database.default.password=jalur_dev
+      - database.default.DBDriver=MySQLi
+      - app.baseURL=http://localhost:8010
+      - AI_SERVICE_URL=http://host.docker.internal:8000
+      # JWT (fallback jika .env tidak terbaca di container)
+      - JWT_SECRET=${JWT_SECRET:-ganti_dengan_string_rahasia_acak_minimal_32_karakter}
+    command: sh -c "chmod -R 777 writable 2>/dev/null || true; php -S 0.0.0.0:8080 -t public vendor/codeigniter4/framework/system/rewrite.php"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_started
+    networks:
+      - jalur-network
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    image: jalur-ai-service
+    container_name: jalur-ai-service
+    working_dir: /app
+    volumes:
+      - ./ai-service:/app
+    # Port 8000 TIDAK di-expose ke host (hanya backend yang akses lewat internal network)
+    expose:
+      - "8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    networks:
+      - jalur-network
+
+  mysql:
+    image: mysql:8.0
+    platform: linux/amd64
+    container_name: jalur-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: jalur
+      MYSQL_USER: jalur
+      MYSQL_PASSWORD: jalur_dev
+    ports:
+      - "3310:3306"
+    volumes:
+      - jalur-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - jalur-network
+
+volumes:
+  jalur-node-modules:
+  jalur-mysql-data:
+
+networks:
+  jalur-network:
+    driver: bridge

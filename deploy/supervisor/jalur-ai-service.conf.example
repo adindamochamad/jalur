@@ -1,0 +1,16 @@
+; Contoh config Supervisor untuk AI Service (FastAPI).
+; Simpan di /etc/supervisor/conf.d/jalur-ai-service.conf
+; Lalu: supervisorctl reread && supervisorctl update && supervisorctl start jalur-ai
+
+[program:jalur-ai]
+command=/path/to/jalur/ai-service/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+directory=/path/to/jalur/ai-service
+user=www-data
+autostart=true
+autorestart=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/jalur-ai.log
+environment=PYTHONUNBUFFERED="1"
+
+; Ganti /path/to/jalur dengan path project Anda.
+; Pastikan venv sudah ada dan dependencies terinstall (pip install -r requirements.txt).

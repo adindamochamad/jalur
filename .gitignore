@@ -1,0 +1,26 @@
+# File sensitif — jangan pernah commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Backup lokal (boleh hapus dari repo)
+backend_backup/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AI: virtualenv (install di server: python -m venv venv && pip install -r requirements.txt)
+ai-service/venv/
+
+# AI: dataset (gambar training/validasi — unduh atau siapkan sendiri)
+ai-service/datasets/
+
+# AI: model besar (unduh via scripts/download_pothole_model.sh)
+ai-service/models/*.pt
+!ai-service/models/.gitkeep
+
+# Hasil tes (opsional)
+ai-service/hasil_deteksi/

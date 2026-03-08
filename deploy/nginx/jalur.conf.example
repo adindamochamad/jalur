@@ -1,0 +1,56 @@
+# Contoh konfigurasi Nginx untuk Jalur (production).
+# Simpan sebagai /etc/nginx/sites-available/jalur lalu:
+#   ln -s /etc/nginx/sites-available/jalur /etc/nginx/sites-enabled/
+#   nginx -t && systemctl reload nginx
+#
+# Ganti YOUR_DOMAIN dengan domain Anda (mis. jalur.example.com).
+# Setelah SSL: ganti listen 80; dengan include snippet di bawah.
+
+# Redirect HTTP -> HTTPS (setelah Certbot)
+# server {
+#     listen 80;
+#     server_name YOUR_DOMAIN;
+#     return 301 https://$server_name$request_uri;
+# }
+
+server {
+    listen 80;
+    server_name YOUR_DOMAIN;
+
+    # Frontend (Next.js — build dulu: npm run build, jalankan npm start di port 3000)
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Backend API (CI4 — php-fpm atau php spark serve di belakang)
+    location /api {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Upload foto (static dari public CI4)
+    location /uploads {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+    }
+}
+
+# Blok HTTPS (setelah dapat sertifikat Certbot):
+# server {
+#     listen 443 ssl http2;
+#     server_name YOUR_DOMAIN;
+#     ssl_certificate     /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
+#     # ... location blok sama seperti di atas ...
+# }

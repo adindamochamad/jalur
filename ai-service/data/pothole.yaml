@@ -1,0 +1,14 @@
+# Konfigurasi dataset pothole untuk YOLO (training & validasi).
+# Path relatif terhadap folder ai-service (cwd saat jalankan evaluate.py).
+# Sesuaikan train/val jika struktur download Kaggle berbeda.
+path: datasets/pothole-yolov8
+train: train/images
+val: valid/images
+# Alternatif jika dataset pakai nama 'val' bukan 'valid':
+# val: val/images
+
+names:
+  0: pothole
+
+# Jumlah kelas
+nc: 1
