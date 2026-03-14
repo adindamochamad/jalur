@@ -192,6 +192,32 @@ class Database extends Config
 
     public function __construct()
     {
+        // Override dari env SEBELUM parent (Docker: database.default.hostname=mysql) agar backend konek ke container MySQL
+        $hostname = env('database.default.hostname');
+        if ($hostname !== null && $hostname !== '' && $hostname !== false) {
+            $this->default['hostname'] = $hostname;
+            $u = env('database.default.username');
+            if ($u !== null && $u !== '' && $u !== false) {
+                $this->default['username'] = $u;
+            }
+            $p = env('database.default.password');
+            if ($p !== null && $p !== false) {
+                $this->default['password'] = (string) $p;
+            }
+            $d = env('database.default.database');
+            if ($d !== null && $d !== '' && $d !== false) {
+                $this->default['database'] = $d;
+            }
+            $driver = env('database.default.DBDriver');
+            if ($driver !== null && $driver !== '' && $driver !== false) {
+                $this->default['DBDriver'] = $driver;
+            }
+            $port = env('database.default.port');
+            if ($port !== null && $port !== '' && $port !== false) {
+                $this->default['port'] = (int) $port;
+            }
+        }
+
         parent::__construct();
 
         // Ensure that we always set the database group to 'tests' if

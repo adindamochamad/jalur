@@ -34,12 +34,18 @@ class Cors extends BaseConfig
          *   - ['http://localhost:8080']
          *   - ['https://www.example.com']
          */
-        'allowedOrigins' => [
-            'http://localhost:3010',
-            'http://127.0.0.1:3010',
-            'http://localhost:3000',
-            'http://127.0.0.1:3000',
-        ],
+        // Default: localhost saja. Origin production tambahkan lewat env CORS_EXTRA_ORIGINS (pisah koma).
+        'allowedOrigins' => array_values(array_filter(array_merge(
+            [
+                'http://localhost:3010',
+                'http://127.0.0.1:3010',
+                'http://localhost:3000',
+                'http://127.0.0.1:3000',
+            ],
+            env('CORS_EXTRA_ORIGINS')
+                ? array_map('trim', explode(',', (string) env('CORS_EXTRA_ORIGINS')))
+                : []
+        ))),
 
         /**
          * Origin regex patterns for the `Access-Control-Allow-Origin` header.

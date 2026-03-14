@@ -8,7 +8,7 @@
 # Cara jalankan: docker compose up -d
 #   → Frontend:  http://localhost:3010
 #   → API:       http://localhost:8010
-#   → MySQL:     host 127.0.0.1, port 3310, user root, password root, database jalur
+#   → MySQL:     host 127.0.0.1, port 3310, user root, password dari .env, database jalur
 
 services:
   frontend:
@@ -21,9 +21,11 @@ services:
     ports:
       - "3010:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8010
-      - NODE_ENV=development
-    command: sh -c "npm install && npm run dev"
+      # Isi di .env: NEXT_PUBLIC_API_URL (default http://localhost:8010)
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8010}
+      - NODE_ENV=production
+    # Production build: install termasuk dev (untuk TypeScript saat build), lalu build & start
+    command: sh -c "npm install --include=dev && (test -f .next/BUILD_ID || npm run build) && npm run start"
     networks:
       - jalur-network
 
@@ -41,14 +43,14 @@ services:
     environment:
       - CI_ENVIRONMENT=development
       - database.default.hostname=mysql
-      - database.default.database=jalur
-      - database.default.username=jalur
-      - database.default.password=jalur_dev
+      - database.default.database=${MYSQL_DATABASE:-jalur}
+      - database.default.username=${MYSQL_USER:-jalur}
+      - database.default.password=${MYSQL_PASSWORD}
       - database.default.DBDriver=MySQLi
-      - app.baseURL=http://localhost:8010
-      - AI_SERVICE_URL=http://host.docker.internal:8000
-      # JWT (fallback jika .env tidak terbaca di container)
-      - JWT_SECRET=${JWT_SECRET:-ganti_dengan_string_rahasia_acak_minimal_32_karakter}
+      - app.baseURL=${APP_BASE_URL:-http://localhost:8010}
+      - AI_SERVICE_URL=http://ai-service:8000
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_EXTRA_ORIGINS=${CORS_EXTRA_ORIGINS:-}
     command: sh -c "chmod -R 777 writable 2>/dev/null || true; php -S 0.0.0.0:8080 -t public vendor/codeigniter4/framework/system/rewrite.php"
     depends_on:
       mysql:
@@ -81,16 +83,16 @@ services:
     platform: linux/amd64
     container_name: jalur-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: jalur
-      MYSQL_USER: jalur
-      MYSQL_PASSWORD: jalur_dev
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-jalur}
+      MYSQL_USER: ${MYSQL_USER:-jalur}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3310:3306"
     volumes:
       - jalur-mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 10
