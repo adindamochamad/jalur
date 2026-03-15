@@ -1,14 +1,6 @@
-/**
- * Helper format tampilan (tanggal, dll.) — satu tempat agar konsisten.
- */
-
 export function formatTanggal(
   iso: string,
-  opsi: Intl.DateTimeFormatOptions = {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }
+  opsi: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" }
 ): string {
   try {
     return new Date(iso).toLocaleDateString("id-ID", opsi);

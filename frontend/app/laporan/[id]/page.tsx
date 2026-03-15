@@ -9,7 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { checkAuth, getLaporanById, updateLaporan } from "@/lib/api";
-import { baseUrl } from "@/lib/api";
 import { formatTanggalLengkap } from "@/lib/format";
 import type { Laporan } from "@/lib/types";
 
@@ -21,10 +20,13 @@ const OPSI_STATUS: { value: StatusLaporan; label: string }[] = [
   { value: "selesai", label: "Selesai" },
 ];
 
-function urlFoto(path: string | null): string | null {
+function sumberFoto(dataUrl: string | null | undefined, path: string | null): string | null {
+  if (dataUrl) return dataUrl;
   if (!path) return null;
-  const base = baseUrl.replace(/\/$/, "");
-  return path.startsWith("http") ? path : `${base}/${path.replace(/^\//, "")}`;
+  if (path.startsWith("data:") || path.startsWith("http")) return path;
+  const norm = path.replace(/^\//, "");
+  if (norm.startsWith("uploads/")) return `/api/${norm}`;
+  return null;
 }
 
 export default function DetailLaporanPage() {
@@ -137,8 +139,8 @@ export default function DetailLaporanPage() {
     );
   }
 
-  const fotoAsliUrl = urlFoto(laporan.foto_asli);
-  const fotoHasilUrl = urlFoto(laporan.foto_hasil);
+  const fotoAsliSrc = sumberFoto(laporan.foto_asli_data, laporan.foto_asli);
+  const fotoHasilSrc = sumberFoto(laporan.foto_hasil_data, laporan.foto_hasil);
 
   const handleSimpanStatus = async () => {
     if (statusPilihan === laporan.status) {
@@ -174,7 +176,6 @@ export default function DetailLaporanPage() {
           <CardTitle>Info Laporan</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Admin: ubah status */}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-sm">Status:</span>
             <select
@@ -244,10 +245,10 @@ export default function DetailLaporanPage() {
             <CardTitle>Foto Asli</CardTitle>
           </CardHeader>
           <CardContent>
-            {fotoAsliUrl ? (
+            {fotoAsliSrc ? (
               <div className="relative aspect-video w-full overflow-hidden rounded-md bg-muted">
                 <img
-                  src={fotoAsliUrl}
+                  src={fotoAsliSrc}
                   alt="Foto jalan asli"
                   className="object-contain w-full h-full"
                 />
@@ -262,18 +263,16 @@ export default function DetailLaporanPage() {
             <CardTitle>Foto Hasil Deteksi</CardTitle>
           </CardHeader>
           <CardContent>
-            {fotoHasilUrl ? (
+            {fotoHasilSrc ? (
               <div className="relative aspect-video w-full overflow-hidden rounded-md bg-muted">
                 <img
-                  src={fotoHasilUrl}
+                  src={fotoHasilSrc}
                   alt="Foto dengan deteksi lubang"
                   className="object-contain w-full h-full"
                 />
               </div>
             ) : (
-              <p className="text-muted-foreground text-sm">
-                Belum ada hasil deteksi
-              </p>
+              <p className="text-muted-foreground text-sm">Belum ada hasil deteksi</p>
             )}
           </CardContent>
         </Card>

@@ -3,14 +3,7 @@
 use CodeIgniter\Boot;
 use Config\Paths;
 
-// Debug: pastikan request sampai ke index.php (path /tmp selalu writable di container)
-file_put_contents('/tmp/jalur-request-hit.log', date('c') . ' index.php reached' . "\n", FILE_APPEND);
-$log_dir = __DIR__ . '/../writable/logs';
-if (is_dir($log_dir)) {
-    @file_put_contents($log_dir . '/request-debug.log', date('c') . ' request reached index.php' . "\n", FILE_APPEND);
-}
-
-// Tangkap error fatal dan tulis ke file agar bisa dibaca (debug ECONNRESET)
+// Tangkap error fatal dan tulis ke file agar bisa dibaca
 register_shutdown_function(static function (): void {
     $err = error_get_last();
     if ($err !== null && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {

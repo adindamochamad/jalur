@@ -1,8 +1,3 @@
-/**
- * Tipe data untuk response API (User, Laporan, Stats, dll.).
- * Sesuai kontrak backend CI4.
- */
-
 export interface User {
   id: number;
   nama: string;
@@ -14,6 +9,8 @@ export interface Laporan {
   id: number;
   foto_asli: string | null;
   foto_hasil: string | null;
+  foto_asli_data?: string | null;
+  foto_hasil_data?: string | null;
   latitude: string | null;
   longitude: string | null;
   alamat: string | null;
@@ -50,13 +47,9 @@ export interface ResponseSatuLaporan {
 export interface ResponseLogin {
   status: boolean;
   message: string;
-  data?: {
-    token: string;
-    user: User;
-  };
+  data?: { token: string; user: User };
 }
 
-/** Statistik dashboard: total, per status, per keparahan. */
 export interface DashboardStats {
   total: number;
   per_status: Record<string, number>;
@@ -69,7 +62,6 @@ export interface ResponseDashboardStats {
   data: DashboardStats;
 }
 
-/** Satu marker untuk peta dashboard. */
 export interface MarkerPeta {
   id: number;
   latitude: number;
@@ -85,7 +77,6 @@ export interface ResponseDashboardPeta {
   data: MarkerPeta[];
 }
 
-/** Data ringkas status laporan (endpoint publik). */
 export interface StatusLaporanPublik {
   id: number;
   status: string;

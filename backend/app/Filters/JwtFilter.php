@@ -16,12 +16,10 @@ class JwtFilter implements FilterInterface
 {
     public function before(RequestInterface $request, $arguments = null)
     {
-        // Preflight OPTIONS tidak bawa Authorization; biarkan lewat agar CORS jalan
         if (strtoupper($request->getMethod()) === 'OPTIONS') {
             return $request;
         }
 
-        // Baca token dari httpOnly cookie dulu, fallback ke header Authorization
         $token = $request->getCookie('jalur_token');
         if (empty($token)) {
             $header = $request->getHeaderLine('Authorization');
@@ -31,33 +29,26 @@ class JwtFilter implements FilterInterface
         }
 
         if (empty($token)) {
-            return $this->responUnauthorized('Token tidak ditemukan');
-        }
-
-        if ($token === '') {
-            return $this->responUnauthorized('Token tidak valid');
+            return $this->respon(401, 'Token tidak ditemukan');
         }
 
         $secret = getenv('JWT_SECRET');
         if (empty($secret)) {
-            return $this->responUnauthorized('Konfigurasi JWT tidak lengkap', 500);
+            return $this->respon(500, 'Konfigurasi JWT tidak lengkap');
         }
 
         try {
-            $key   = new Key($secret, 'HS256');
+            $key     = new Key($secret, 'HS256');
             $payload = JWT::decode($token, $key);
-        } catch (ExpiredException $e) {
-            return $this->responUnauthorized('Token kedaluwarsa');
-        } catch (SignatureInvalidException $e) {
-            return $this->responUnauthorized('Token tidak valid');
-        } catch (InvalidArgumentException | UnexpectedValueException $e) {
-            return $this->responUnauthorized('Token tidak valid');
+        } catch (ExpiredException) {
+            return $this->respon(401, 'Token kedaluwarsa');
+        } catch (SignatureInvalidException | InvalidArgumentException | UnexpectedValueException) {
+            return $this->respon(401, 'Token tidak valid');
         }
 
-        // Simpan user_id ke request agar controller bisa baca (properti dinamis)
         $request->user_id = $payload->user_id ?? null;
         if ($request->user_id === null) {
-            return $this->responUnauthorized('Payload token tidak lengkap');
+            return $this->respon(401, 'Payload token tidak lengkap');
         }
 
         return $request;
@@ -68,16 +59,11 @@ class JwtFilter implements FilterInterface
         return $response;
     }
 
-
-    private function responUnauthorized(string $pesan, int $kode = 401): ResponseInterface
+    private function respon(int $kode, string $pesan): ResponseInterface
     {
         $respon = service('response');
         $respon->setStatusCode($kode);
-        $respon->setJSON([
-            'status'  => false,
-            'message' => $pesan,
-        ]);
-
+        $respon->setJSON(['status' => false, 'message' => $pesan]);
         return $respon;
     }
 }

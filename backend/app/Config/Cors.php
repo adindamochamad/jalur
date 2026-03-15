@@ -12,7 +12,7 @@ use CodeIgniter\Config\BaseConfig;
 class Cors extends BaseConfig
 {
     /**
-     * The default CORS configuration.
+     * The default CORS configuration. allowedOrigins diisi di constructor (env() bukan constant).
      *
      * @var array{
      *      allowedOrigins: list<string>,
@@ -24,41 +24,25 @@ class Cors extends BaseConfig
      *      maxAge: int,
      *  }
      */
-    public array $default = [
-        /**
-         * Origins for the `Access-Control-Allow-Origin` header.
-         *
-         * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin
-         *
-         * E.g.:
-         *   - ['http://localhost:8080']
-         *   - ['https://www.example.com']
-         */
-        // Default: localhost saja. Origin production tambahkan lewat env CORS_EXTRA_ORIGINS (pisah koma).
-        'allowedOrigins' => array_values(array_filter(array_merge(
-            [
-                'http://localhost:3010',
-                'http://127.0.0.1:3010',
-                'http://localhost:3000',
-                'http://127.0.0.1:3000',
-            ],
-            env('CORS_EXTRA_ORIGINS')
-                ? array_map('trim', explode(',', (string) env('CORS_EXTRA_ORIGINS')))
-                : []
-        ))),
+    public array $default;
 
-        /**
-         * Origin regex patterns for the `Access-Control-Allow-Origin` header.
-         *
-         * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Origin
-         *
-         * NOTE: A pattern specified here is part of a regular expression. It will
-         *       be actually `#\A<pattern>\z#`.
-         *
-         * E.g.:
-         *   - ['https://\w+\.example\.com']
-         */
-        'allowedOriginsPatterns' => [],
+    public function __construct()
+    {
+        $origins = [
+            'http://localhost:3010',
+            'http://127.0.0.1:3010',
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+        ];
+        $extra = env('CORS_EXTRA_ORIGINS');
+        if ($extra !== null && $extra !== '' && $extra !== false) {
+            $tambahan = array_map('trim', explode(',', (string) $extra));
+            $origins = array_values(array_filter(array_merge($origins, $tambahan)));
+        }
+
+        $this->default = [
+            'allowedOrigins' => $origins,
+            'allowedOriginsPatterns' => [],
 
         /**
          * Weather to send the `Access-Control-Allow-Credentials` header.
@@ -112,5 +96,7 @@ class Cors extends BaseConfig
          * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Max-Age
          */
         'maxAge' => 7200,
-    ];
+        ];
+        parent::__construct();
+    }
 }

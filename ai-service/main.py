@@ -1,8 +1,5 @@
-"""
-Layanan AI deteksi jalan berlubang — FastAPI.
-Endpoint /detect akan dipanggil oleh backend CI4 (internal only).
-"""
 import base64
+import io
 import logging
 import os
 import time
@@ -10,65 +7,97 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, UploadFile, File
+from PIL import Image
 from ultralytics import YOLO
+
+try:
+    from pi_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Jalur AI Service", version="0.1.0")
 
-# Path model custom; jika tidak ada, pakai yolov8n.pt (di-download otomatis)
 DIR_MODEL = os.path.join(os.path.dirname(__file__), "models")
 PATH_MODEL_CUSTOM = os.path.join(DIR_MODEL, "pothole_yolov8.pt")
-
-# Hanya hitung deteksi yang kelasnya pothole (nama bisa "pothole", "lubang", atau class_id 0 jika model 1 kelas)
-# Model custom pothole biasanya 1 kelas (pothole). Model COCO (yolov8n) tidak punya pothole — semua deteksi diabaikan.
 KELAS_POTHOLE_NAMES = {"pothole", "lubang", "hole"}
+
+# Threshold deteksi: turunkan DETECT_CONF agar lebih banyak lubang terdeteksi (trade-off: false positive bisa naik)
+DETECT_CONF = float(os.environ.get("DETECT_CONF", "0.2"))
+DETECT_IOU = float(os.environ.get("DETECT_IOU", "0.7"))
 
 
 @app.on_event("startup")
-def load_model():   
-    """Load model YOLO sekali saat startup, simpan di app.state."""
+def load_model():
     if os.path.isfile(PATH_MODEL_CUSTOM):
-        model = YOLO(PATH_MODEL_CUSTOM)
-        app.state.model = model
+        app.state.model = YOLO(PATH_MODEL_CUSTOM)
         app.state.model_path = PATH_MODEL_CUSTOM
-        logger.info("Model loaded: %s", PATH_MODEL_CUSTOM)
     else:
-        # Fallback untuk development: model nano (ringan, di-download otomatis)
-        model = YOLO("yolov8n.pt")
-        app.state.model = model
+        app.state.model = YOLO("yolov8n.pt")
         app.state.model_path = "yolov8n.pt"
-        logger.info("Model custom tidak ditemukan, pakai fallback: yolov8n.pt")
 
 
-class DetectRequest(BaseModel):
-    """Body request POST /detect. image_base64 boleh dengan prefix data:image/...;base64,."""
-    image_base64: str = ""
+def _raw_bytes_to_img(raw: bytes) -> Optional[np.ndarray]:
+    if not raw:
+        return None
+    # Coba PIL dulu (lebih tahan terhadap variasi JPEG/PNG)
+    try:
+        pil_img = Image.open(io.BytesIO(raw))
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    except Exception:
+        pass
+    # Fallback: OpenCV dari buffer
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is not None:
+        return img
+    img = cv2.imdecode(np.ascontiguousarray(arr), cv2.IMREAD_COLOR)
+    if img is not None:
+        return img
+    return None
 
 
 def _decode_image_base64(payload: str) -> Optional[np.ndarray]:
-    """Decode string base64 jadi gambar (BGR numpy). Mengabaikan prefix data:image/...;base64,."""
-    if not payload or not payload.strip():
+    if not payload or not isinstance(payload, str):
         return None
-    s = payload.strip()
+    s = payload.strip().replace("\r", "").replace("\n", "").replace(" ", "")
     if "," in s and s.startswith("data:"):
-        s = s.split(",", 1)[1]
+        s = s.split(",", 1)[1].strip()
+    if not s:
+        return None
+    pad = 4 - (len(s) % 4)
+    if pad != 4:
+        s += "=" * pad
     try:
-        raw = base64.b64decode(s)
+        raw = base64.b64decode(s, validate=False)
     except Exception:
         return None
     if not raw:
         return None
+
     arr = np.frombuffer(raw, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    return img
+    if img is not None:
+        return img
+    img = cv2.imdecode(np.ascontiguousarray(arr), cv2.IMREAD_COLOR)
+    if img is not None:
+        return img
+    try:
+        pil_img = Image.open(io.BytesIO(raw))
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    except Exception:
+        return None
 
 
 def _keparahan_dari_hasil(jumlah_lubang: int, confidence_rata: Optional[float]) -> str:
-    """Tentukan keparahan dari jumlah deteksi dan confidence (rule sederhana)."""
     if jumlah_lubang == 0:
         return "ringan"
     if jumlah_lubang >= 3:
@@ -80,80 +109,31 @@ def _keparahan_dari_hasil(jumlah_lubang: int, confidence_rata: Optional[float]) 
 
 @app.get("/")
 def root(request: Request):
-    """Info service dan model yang sedang dipakai (untuk cek apakah pothole model ter-load)."""
     model_path = getattr(request.app.state, "model_path", None)
-    return {
-        "service": "jalur-ai",
-        "status": "ok",
-        "model": model_path or "belum di-load",
-    }
+    return {"service": "jalur-ai", "status": "ok", "model": model_path or "belum di-load"}
 
 
-@app.post("/detect")
-def detect(body: DetectRequest, request: Request):
-    """
-    Terima gambar base64, jalankan inferensi YOLO, return jumlah_lubang, keparahan,
-    confidence, foto_hasil_base64, dan daftar deteksi (label, confidence, bbox).
-    """
+def _run_detection(img: np.ndarray, request: Request):
     mulai = time.perf_counter()
-
-    if not body.image_base64 or not body.image_base64.strip():
-        logger.warning("detect: image_base64 kosong")
-        return {
-            "success": False,
-            "message": "image_base64 wajib diisi",
-            "jumlah_lubang": 0,
-            "keparahan": "ringan",
-            "confidence": None,
-            "foto_hasil_base64": None,
-            "deteksi": [],
-        }
-
-    img = _decode_image_base64(body.image_base64)
-    if img is None:
-        logger.warning("detect: decode base64 gagal")
-        return {
-            "success": False,
-            "message": "Gambar tidak valid atau base64 gagal decode",
-            "jumlah_lubang": 0,
-            "keparahan": "ringan",
-            "confidence": None,
-            "foto_hasil_base64": None,
-            "deteksi": [],
-        }
-
     model = getattr(request.app.state, "model", None)
     if model is None:
-        logger.error("detect: model belum di-load")
-        return {
-            "success": False,
-            "message": "Model belum siap",
-            "jumlah_lubang": 0,
-            "keparahan": "ringan",
-            "confidence": None,
-            "foto_hasil_base64": None,
-            "deteksi": [],
-        }
+        return _respon_gagal("Model belum siap")
 
     try:
-        results = model.predict(img, verbose=False)
+        results = model.predict(
+            img,
+            verbose=False,
+            conf=DETECT_CONF,
+            iou=DETECT_IOU,
+        )
     except Exception as e:
         logger.exception("detect: inferensi gagal: %s", e)
-        return {
-            "success": False,
-            "message": f"Inferensi gagal: {e!s}",
-            "jumlah_lubang": 0,
-            "keparahan": "ringan",
-            "confidence": None,
-            "foto_hasil_base64": None,
-            "deteksi": [],
-        }
+        return _respon_gagal(f"Inferensi gagal: {e!s}")
 
     result = results[0]
     boxes = result.boxes
     names = result.names or {}
 
-    # Hanya hitung deteksi yang kelasnya pothole; abaikan kelas lain (mobil, orang, dll.)
     jumlah_lubang = 0
     confidence_rata = None
     deteksi_list: list[dict] = []
@@ -168,29 +148,25 @@ def detect(body: DetectRequest, request: Request):
             xyxy = xyxy.cpu().numpy()
         if hasattr(cls_arr, "cpu"):
             cls_arr = cls_arr.cpu().numpy()
-
         conf_list: list[float] = []
         for i in range(len(boxes.data)):
             cls_id = int(cls_arr[i]) if i < len(cls_arr) else 0
             label = names.get(cls_id, f"class_{cls_id}")
             label_lower = label.lower() if isinstance(label, str) else ""
-            # Hitung hanya jika kelas termasuk pothole, atau model 1 kelas (id 0 = pothole)
             if label_lower in KELAS_POTHOLE_NAMES or (len(names) == 1 and cls_id == 0):
                 jumlah_lubang += 1
                 conf = float(confs[i]) if i < len(confs) else 0.0
                 conf_list.append(conf)
-                bbox = xyxy[i].tolist()
                 deteksi_list.append({
                     "label": label,
                     "confidence": round(conf, 4),
-                    "bbox": [round(x, 2) for x in bbox],
+                    "bbox": [round(x, 2) for x in xyxy[i].tolist()],
                 })
         if conf_list:
             confidence_rata = float(np.mean(conf_list))
 
     keparahan = _keparahan_dari_hasil(jumlah_lubang, confidence_rata)
 
-    # Gambar dengan bbox overlay, encode ke base64
     foto_hasil_base64 = None
     try:
         img_plot = result.plot()
@@ -198,12 +174,10 @@ def detect(body: DetectRequest, request: Request):
             _, buf = cv2.imencode(".jpg", img_plot)
             if buf is not None:
                 foto_hasil_base64 = base64.b64encode(buf.tobytes()).decode("ascii")
-    except Exception as e:
-        logger.warning("detect: plot/g encode gagal: %s", e)
+    except Exception:
+        pass
 
-    lama_detik = round(time.perf_counter() - mulai, 3)
-    logger.info("detect: jumlah_lubang=%s keparahan=%s lama=%ss", jumlah_lubang, keparahan, lama_detik)
-
+    logger.info("detect: jumlah_lubang=%s keparahan=%s lama=%ss", jumlah_lubang, keparahan, round(time.perf_counter() - mulai, 3))
     return {
         "success": True,
         "message": "ok",
@@ -212,4 +186,25 @@ def detect(body: DetectRequest, request: Request):
         "confidence": round(confidence_rata, 4) if confidence_rata is not None else None,
         "foto_hasil_base64": foto_hasil_base64,
         "deteksi": deteksi_list,
+    }
+
+
+@app.post("/detect")
+async def detect(request: Request, image: UploadFile = File(..., alias="image")):
+    raw = await image.read()
+    img = _raw_bytes_to_img(raw)
+    if img is None:
+        return _respon_gagal("Gambar tidak valid")
+    return _run_detection(img, request)
+
+
+def _respon_gagal(message: str):
+    return {
+        "success": False,
+        "message": message,
+        "jumlah_lubang": 0,
+        "keparahan": "ringan",
+        "confidence": None,
+        "foto_hasil_base64": None,
+        "deteksi": [],
     }

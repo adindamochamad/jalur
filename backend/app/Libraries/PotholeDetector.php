@@ -2,86 +2,79 @@
 
 namespace App\Libraries;
 
-use CodeIgniter\HTTP\ResponseInterface;
+use CURLFile;
 
-/**
- * Library untuk memanggil layanan AI deteksi lubang jalan.
- * Mengirim gambar (base64) ke AI_SERVICE_URL/detect dan mengembalikan hasil.
- */
 class PotholeDetector
 {
-    /** Timeout request ke AI service (detik) */
     private const TIMEOUT = 30;
 
-    /** Nilai default jika AI error/timeout */
     private const DEFAULT_HASIL = [
-        'jumlah_lubang'      => 0,
-        'keparahan'          => 'ringan',
-        'confidence'         => null,
-        'foto_hasil_base64'  => null,
+        'jumlah_lubang' => 0,
+        'keparahan' => 'ringan',
+        'confidence' => null,
+        'foto_hasil_base64' => null,
     ];
 
-    /**
-     * Deteksi lubang dari file gambar.
-     *
-     * @param string $pathGambar Path absolut ke file gambar (foto_asli).
-     * @return array{jumlah_lubang: int, keparahan: string, confidence: float|null, foto_hasil_base64: string|null}
-     */
     public function detect(string $pathGambar): array
     {
         if (! is_file($pathGambar)) {
             return self::DEFAULT_HASIL;
         }
 
-        $isiFile = file_get_contents($pathGambar);
-        if ($isiFile === false) {
-            return self::DEFAULT_HASIL;
-        }
-
-        $base64 = base64_encode($isiFile);
-        $urlAi  = getenv('AI_SERVICE_URL') ?: 'http://127.0.0.1:8000';
-        $url    = rtrim($urlAi, '/') . '/detect';
+        $url = rtrim(getenv('AI_SERVICE_URL') ?: 'http://127.0.0.1:8000', '/') . '/detect';
+        $pathResolved = realpath($pathGambar) ?: $pathGambar;
+        $mime         = mime_content_type($pathResolved) ?: 'image/jpeg';
+        $namaFile     = basename($pathGambar);
 
         try {
-            $client   = service('curlrequest', ['timeout' => self::TIMEOUT]);
-            $response = $client->post($url, [
-                'json' => ['image_base64' => $base64],
+            // Pakai native cURL agar file biner terkirim persis tanpa modifikasi framework
+            $ch = curl_init($url);
+            if ($ch === false) {
+                return self::DEFAULT_HASIL;
+            }
+            $postData = ['image' => new CURLFile($pathResolved, $mime, $namaFile)];
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $postData,
+                CURLOPT_TIMEOUT => self::TIMEOUT,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => ['Accept: application/json'],
             ]);
+            $bodyRaw    = curl_exec($ch);
+            $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlErr    = curl_error($ch);
+            curl_close($ch);
+            if ($curlErr !== '') {
+                log_message('error', 'PotholeDetector curl: ' . $curlErr);
+                return self::DEFAULT_HASIL;
+            }
+            $body = is_string($bodyRaw) ? json_decode($bodyRaw, true) : null;
 
-            if ($response->getStatusCode() !== 200) {
-                log_message('error', 'PotholeDetector: AI service mengembalikan HTTP ' . $response->getStatusCode() . ' — pakai hasil default. URL: ' . $url);
-
+            if ($statusCode !== 200) {
+                $preview = is_string($bodyRaw) ? substr($bodyRaw, 0, 200) : '';
+                log_message('warning', 'PotholeDetector: AI HTTP ' . $statusCode . ' body=' . $preview);
                 return self::DEFAULT_HASIL;
             }
 
-            $body = json_decode($response->getBody(), true);
             if (! is_array($body)) {
-                log_message('error', 'PotholeDetector: respons AI bukan JSON valid — pakai hasil default. URL: ' . $url);
-
+                log_message('warning', 'PotholeDetector: AI respons bukan JSON valid');
                 return self::DEFAULT_HASIL;
             }
+
+            $keparahan = $body['keparahan'] ?? 'ringan';
+            $allowed   = ['ringan', 'sedang', 'parah'];
+            $k         = is_string($keparahan) ? strtolower(trim($keparahan)) : '';
+            $keparahan = in_array($k, $allowed, true) ? $k : 'ringan';
 
             return [
-                'jumlah_lubang'     => (int) ($body['jumlah_lubang'] ?? 0),
-                'keparahan'         => $this->normalisasiKeparahan($body['keparahan'] ?? 'ringan'),
-                'confidence'        => isset($body['confidence']) ? (float) $body['confidence'] : null,
+                'jumlah_lubang' => (int) ($body['jumlah_lubang'] ?? 0),
+                'keparahan' => $keparahan,
+                'confidence' => isset($body['confidence']) ? (float) $body['confidence'] : null,
                 'foto_hasil_base64' => $body['foto_hasil_base64'] ?? null,
             ];
         } catch (\Throwable $e) {
             log_message('error', 'PotholeDetector: ' . $e->getMessage());
-
             return self::DEFAULT_HASIL;
         }
-    }
-
-    /**
-     * Pastikan keparahan hanya nilai yang diizinkan di DB.
-     */
-    private function normalisasiKeparahan(?string $keparahan): string
-    {
-        $allowed = ['ringan', 'sedang', 'parah'];
-        $k       = is_string($keparahan) ? strtolower(trim($keparahan)) : '';
-
-        return in_array($k, $allowed, true) ? $k : 'ringan';
     }
 }

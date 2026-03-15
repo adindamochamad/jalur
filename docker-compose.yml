@@ -21,11 +21,13 @@ services:
     ports:
       - "3010:3000"
     environment:
-      # Isi di .env: NEXT_PUBLIC_API_URL (default http://localhost:8010)
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8010}
+      # Kosongkan agar request API lewat proxy same-origin (cookie login tersimpan)
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+      # Backend URL untuk proxy (dari dalam container frontend)
+      - BACKEND_INTERNAL_URL=http://jalur-backend:8080
       - NODE_ENV=production
-    # Production build: install termasuk dev (untuk TypeScript saat build), lalu build & start
-    command: sh -c "npm install --include=dev && (test -f .next/BUILD_ID || npm run build) && npm run start"
+    # Selalu build agar perubahan kode (termasuk setelah git pull) ikut terbaca
+    command: sh -c "npm install --include=dev && npm run build && npm run start"
     networks:
       - jalur-network
 
